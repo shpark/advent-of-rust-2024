@@ -1,0 +1,22 @@
+[package]
+name = "aoc2024"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+itertools = "0.13.0"
+
+[[bin]]
+name = "day1"
+test = false
+bench = false
+
+[[bin]]
+name = "day3"
+test = false
+bench = false
+
+[[bin]]
+name = "day4"
+test = false
+bench = false
