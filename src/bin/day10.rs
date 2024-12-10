@@ -63,6 +63,7 @@ impl TopographicMap {
     }
 
     fn update(&mut self, curr: (usize, usize)) {
+        // FIXME(ugly)
         if self.positions[curr.0][curr.1].height == 9 {
             self.positions[curr.0][curr.1].reachable.insert(curr);
             self.positions[curr.0][curr.1].rating.replace(1);
