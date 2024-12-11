@@ -15,15 +15,14 @@ impl Stone {
     // F(n, k) = (# stones after blinking stone N k times)
     //
     // - forall n. F(n, 0) = 1
-    // - F(0, 1) = 1
-    // - F(1, 1) = 1
-    // - forall n. len(n.to_string()) % 2 == 0 -> F(n, 1) = 2
-    // - forall n. len(n.to_string()) % 2 == 1 -> F(n, 1) = 1
-    //
-    // - forall n. if let (upper, lower) = n -> F(n, k) = F(uppser, k) + F(lower, k - 1)
-    //             else if n = 0 -> F(n, k) = F(1, k - 1)
-    //             else F(n, k) = F(2024 * n, k - 1)
-    fn blink_k(&self, k: usize, cache: &mut HashMap<(u64, usize), usize>) -> usize {
+    // - forall n >= 1. if let (hi, lo) = n -> F(n, k) = F(hi, k) + F(lo, k - 1)
+    //                  else if n = 0 -> F(n, k) = F(1, k - 1)
+    //                  else F(n, k) = F(2024 * n, k - 1)
+    fn blink_k(
+        &self,
+        k: usize,
+        cache: &mut HashMap<(u64, usize), usize>
+    ) -> usize {
         if let Some(&n) = cache.get(&(self.0, k)) {
             return n;
         }
