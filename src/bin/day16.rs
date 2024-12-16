@@ -15,7 +15,7 @@ enum Tile {
     End,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 enum Dir {
     North,
     South,
@@ -52,7 +52,7 @@ impl Dir {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 struct Reindeer {
     p: (usize, usize),
     dir: Dir,
@@ -71,27 +71,21 @@ impl Reindeer {
                 (Reindeer { p, dir: self.dir }, 1)
         });
 
-        let right = self.dir.rotate_right();
+        neighbors.push((
+            Reindeer {
+                p: self.p,
+                dir: self.dir.rotate_right(),
+            },
+            1000,
+        ));
 
-        neighbors.push({
-                let delta = right.delta();
-                let p = (
-                    ((self.p.0 as i32) + delta.0) as usize,
-                    ((self.p.1 as i32) + delta.1) as usize,
-                );
-                (Reindeer { p, dir: right }, 1001)
-        });
-
-        let left = self.dir.rotate_left();
-
-        neighbors.push({
-                let delta = left.delta();
-                let p = (
-                    ((self.p.0 as i32) + delta.0) as usize,
-                    ((self.p.1 as i32) + delta.1) as usize,
-                );
-                (Reindeer { p, dir: left }, 1001)
-        });
+        neighbors.push((
+            Reindeer {
+                p: self.p,
+                dir: self.dir.rotate_left(),
+            },
+            1000,
+        ));
 
         neighbors
     }
@@ -105,13 +99,11 @@ struct Maze {
 
 impl Maze {
     fn lowest_score(&self) -> Option<usize> {
-        let reindeer = self.reindeer.clone();
-
-        let mut dist: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut dist: HashMap<Reindeer, usize> = HashMap::new();
         let mut pq: VecDeque<Reindeer> = VecDeque::new();
 
-        dist.insert(reindeer.p, 0);
-        pq.push_front(reindeer);
+        dist.insert(self.reindeer.clone(), 0);
+        pq.push_front(self.reindeer.clone());
 
         while !pq.is_empty() {
             let reindeer = pq.pop_back().unwrap();
@@ -121,9 +113,9 @@ impl Maze {
                     continue;
                 }
 
-                let dn = dist.get(&reindeer.p).unwrap() + d;
+                let dn = dist.get(&reindeer).unwrap() + d;
 
-                if dn == *dist.entry(n.p)
+                if dn == *dist.entry(n)
                     .and_modify(|d| *d = if *d > dn { dn } else { *d })
                     .or_insert(dn) {
                     pq.push_front(n);
@@ -131,7 +123,13 @@ impl Maze {
             }
         }
 
-        dist.get(&self.exit).map(|d| *d)
+        dist.into_iter()
+            .filter_map(|(reindeer, d)| if reindeer.p == self.exit {
+                Some(d)
+            } else {
+                None
+            })
+            .min()
     }
 }
 
