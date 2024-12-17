@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-const INPUT: &str = include_str!("./day16.txt");
+const INPUT: &str = include_str!("./day16-sample.txt");
 
 // The Reindeer start on the Start Tile (marked S) facing East and need to
 // reach the End Tile (marked E). They can move forward one tile at a time
@@ -15,7 +15,7 @@ enum Tile {
     End,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 enum Dir {
     North,
     South,
@@ -52,7 +52,7 @@ impl Dir {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 struct Reindeer {
     p: (usize, usize),
     dir: Dir,
@@ -95,18 +95,19 @@ struct Maze {
     reindeer: Reindeer,
     exit: (usize, usize),
     tiles: Vec<Vec<Tile>>,
+    dist_map: HashMap<(Reindeer, Reindeer), usize>,
 }
 
 impl Maze {
     fn lowest_score(&self) -> Option<usize> {
         let mut dist: HashMap<Reindeer, usize> = HashMap::new();
-        let mut pq: VecDeque<Reindeer> = VecDeque::new();
+        let mut q: VecDeque<Reindeer> = VecDeque::new();
 
         dist.insert(self.reindeer.clone(), 0);
-        pq.push_front(self.reindeer.clone());
+        q.push_front(self.reindeer.clone());
 
-        while !pq.is_empty() {
-            let reindeer = pq.pop_back().unwrap();
+        while !q.is_empty() {
+            let reindeer = q.pop_back().unwrap();
 
             for (n, d) in reindeer.neighbors() {
                 if self.tiles[n.p.0][n.p.1] == Tile::Wall {
@@ -118,7 +119,7 @@ impl Maze {
                 if dn == *dist.entry(n)
                     .and_modify(|d| *d = if *d > dn { dn } else { *d })
                     .or_insert(dn) {
-                    pq.push_front(n);
+                    q.push_front(n);
                 }
             }
         }
@@ -130,6 +131,102 @@ impl Maze {
                 None
             })
             .min()
+    }
+
+    fn populate_dist_map(
+        &mut self,
+        src: Reindeer,
+        dst: Reindeer,
+    ) {
+        let mut q: VecDeque<Reindeer> = VecDeque::new();
+
+        println!("{:?}", src);
+
+        self.dist_map.insert((src.clone(), src.clone()), 0);
+        q.push_front(self.reindeer.clone());
+
+        while !q.is_empty() {
+            let reindeer = q.pop_back().unwrap();
+
+            for (n, d) in reindeer.neighbors() {
+                if self.tiles[n.p.0][n.p.1] == Tile::Wall {
+                    continue;
+                }
+
+                if let Some(&n_to_dst) = self.dist_map.get(&(n, dst)) {
+                    let dn = n_to_dst - d;
+
+                    self.dist_map.entry((src.clone(), dst.clone()))
+                        .and_modify(|d| *d = if *d > dn { dn } else { *d })
+                        .or_insert(dn);
+
+                    continue;
+                }
+
+                let dn = self.dist_map.get(&(src, reindeer)).unwrap() + d;
+
+                if dn == *self.dist_map.entry((src, reindeer))
+                    .and_modify(|d| *d = if *d > dn { dn } else { *d })
+                    .or_insert(dn) {
+                    q.push_front(n);
+                }
+            }
+        }
+    }
+
+    fn count_tiles_on_shortest_path(&mut self) -> usize {
+        let dirs = vec![Dir::North, Dir::South, Dir::East, Dir::West];
+
+        for i in 0..self.tiles.len() {
+            for j in 0..self.tiles[0].len() {
+                for dir in dirs.iter() {
+                    self.populate_dist_map(
+                        self.reindeer,
+                        Reindeer { p: (i, j), dir: dir.clone() });
+                }
+            }
+        }
+
+        let lowest_score = self.lowest_score().unwrap();
+
+        let mut res = 0usize;
+
+        for i in 0..self.tiles.len() {
+            for j in 0..self.tiles[0].len() {
+                let mut is_on_shortest_path = false;
+
+                'outer: for dir1 in dirs.iter() {
+                    for dir2 in dirs.iter() {
+                        let r = Reindeer { p: (i, j), dir: dir1.clone() };
+
+                        let d1 = self.dist_map.get(&(
+                            self.reindeer,
+                            r
+                        ));
+
+                        let d2 = self.dist_map.get(&(
+                            r,
+                            Reindeer { p: self.exit, dir: dir2.clone() }
+                        ));
+
+                        match (d1, d2) {
+                            (Some(&d1), Some(&d2)) => if d1 + d2 == lowest_score {
+                                is_on_shortest_path = true;
+                                break 'outer;
+                            },
+                            _ => {},
+                        }
+                    }
+                }
+
+                if is_on_shortest_path {
+                    println!("{:?} is on one of the shortest paths", (i, j));
+                    res += 1;
+                }
+            }
+        }
+
+        res
     }
 }
 
@@ -164,14 +261,25 @@ impl TryFrom<&str> for Maze {
             })
             .collect::<Vec<_>>();
 
-        Ok(Maze { reindeer, exit, tiles })
+        Ok(Maze {
+            reindeer,
+            exit,
+            tiles,
+            dist_map: HashMap::new(),
+        })
     }
 }
 
 fn main() {
-    let maze: Maze = INPUT.try_into().unwrap();
+    let mut maze: Maze = INPUT.try_into().unwrap();
 
     let res = maze.lowest_score();
 
     println!("{}", res.unwrap());
+
+    let res = maze.count_tiles_on_shortest_path();
+
+    println!("{}", res);
+
+    println!("{:?}", maze.dist_map);
 }
