@@ -1,13 +1,8 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{collections::{BinaryHeap, HashMap, HashSet, VecDeque}, usize};
+
+use itertools::Itertools;
 
 const INPUT: &str = include_str!("./day16.txt");
-
-#[derive(PartialEq, Eq)]
-enum Tile {
-    Empty,
-    Wall,
-    End,
-}
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 enum Dir {
@@ -44,205 +39,88 @@ impl Dir {
             Dir::East => Dir::North,
         }
     }
+
+    fn dirs() -> Vec<Dir> {
+        vec![Dir::East, Dir::South, Dir::West, Dir::North]
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-struct Reindeer {
+struct Node {
     p: (usize, usize),
     dir: Dir,
 }
 
-impl Reindeer {
-    fn neighbors(&self) -> Vec<(Reindeer, usize)> {
-        let mut neighbors: Vec<(Reindeer, usize)> = Vec::new();
+impl Node {
+    fn rotate_right(&self) -> Self {
+        Node { p: self.p, dir: self.dir.rotate_right() }
+    }
 
-        neighbors.push({
-                let delta = self.dir.delta();
-                let p = (
-                    ((self.p.0 as i32) + delta.0) as usize,
-                    ((self.p.1 as i32) + delta.1) as usize,
-                );
-                (Reindeer { p, dir: self.dir }, 1)
-        });
+    fn rotate_left(&self) -> Self {
+        Node { p: self.p, dir: self.dir.rotate_left() }
+    }
+}
 
-        neighbors.push((
-            Reindeer {
-                p: self.p,
-                dir: self.dir.rotate_right(),
-            },
-            1000,
-        ));
+#[derive(PartialEq, Eq, Debug)]
+struct Edge {
+    dst: Node,
+    cost: usize,
+}
 
-        neighbors.push((
-            Reindeer {
-                p: self.p,
-                dir: self.dir.rotate_left(),
-            },
-            1000,
-        ));
+impl PartialOrd for Edge {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
-        neighbors
+impl Ord for Edge {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.cost.cmp(&self.cost)
     }
 }
 
 struct Maze {
-    reindeer: Reindeer,
+    src: Node,
     exit: (usize, usize),
-    tiles: Vec<Vec<Tile>>,
-    dist_map: HashMap<(Reindeer, Reindeer), usize>,
+    adj_list: HashMap<Node, Vec<Edge>>,
 }
 
 impl Maze {
-    fn lowest_score(&self) -> Option<usize> {
-        let mut dist: HashMap<Reindeer, usize> = HashMap::new();
-        let mut q: VecDeque<Reindeer> = VecDeque::new();
+    fn dijkstra(&self) -> (HashMap<Node, usize>, HashMap<Node, HashSet<Node>>) {
+        let mut pq: BinaryHeap<Edge> = BinaryHeap::new();
+        let mut dist = HashMap::new();
+        let mut prev = HashMap::new();
 
-        dist.insert(self.reindeer.clone(), 0);
-        q.push_front(self.reindeer.clone());
+        dist.insert(self.src, 0);
+        prev.insert(self.src, HashSet::new());
+        pq.push(Edge { dst: self.src, cost: 0 });
 
-        while !q.is_empty() {
-            let reindeer = q.pop_back().unwrap();
+        while let Some(Edge { dst: u, cost: _cost }) = pq.pop() {
+            if let Some(neighbors) = self.adj_list.get(&u) {
+                for &Edge { dst: v, cost } in neighbors {
+                    let alt = dist.get(&u).unwrap_or(&usize::MAX) + cost;
 
-            for (n, d) in reindeer.neighbors() {
-                if self.tiles[n.p.0][n.p.1] == Tile::Wall {
-                    continue;
-                }
+                    let res = dist.entry(v)
+                        .and_modify(|dist_v| if alt < *dist_v {
+                            *dist_v = alt;
+                        })
+                        .or_insert(alt);
 
-                let dn = dist.get(&reindeer).unwrap() + d;
-
-                if dn == *dist.entry(n)
-                    .and_modify(|d| *d = if *d > dn { dn } else { *d })
-                    .or_insert(dn) {
-                    q.push_front(n);
-                }
-            }
-        }
-
-        dist.into_iter()
-            .filter_map(|(reindeer, d)| if reindeer.p == self.exit {
-                Some(d)
-            } else {
-                None
-            })
-            .min()
-    }
-
-    fn populate_dist_map(&mut self, src: Reindeer) {
-        if self.tiles[src.p.0][src.p.1] == Tile::Wall {
-            return;
-        }
-
-        let mut q: VecDeque<Reindeer> = VecDeque::new();
-
-        // println!("{:?}", src);
-
-        self.dist_map.insert((src.clone(), src.clone()), 0);
-        q.push_front(src.clone());
-
-        while !q.is_empty() {
-            let reindeer = q.pop_back().unwrap();
-
-            // println!("popped: {:?}", reindeer);
-
-            for (n, d) in reindeer.neighbors() {
-                // println!("  neighbor: {:?} in distance {}", n, d);
-
-                if self.tiles[n.p.0][n.p.1] == Tile::Wall {
-                    continue;
-                }
-
-                // println!("    trying to get dist_map({:?}, {:?})", src, reindeer);
-
-                let dn = self.dist_map.get(&(src, reindeer)).unwrap() + d;
-
-                // println!("    dist_map({:?}, {:?})={}", src, reindeer, dn - d);
-
-                if dn == *self.dist_map.entry((src, n))
-                    .and_modify(|d| *d = if *d > dn { dn } else { *d })
-                    .or_insert(dn) {
-                    // println!("      dist_map({:?}, {:?}) = {} ", src, n, dn);
-                    // println!("      pushed {:?} to the queue", n);
-
-                    // if let Some(&n_to_dst) = self.dist_map.get(&(n, dst)) {
-                    //     println!("dist_map({:?}, {:?}) is not empty", n, dst);
-
-                    //     let dn = n_to_dst - d;
-
-                    //     self.dist_map.entry((src.clone(), dst.clone()))
-                    //         .and_modify(|d| *d = if *d > dn { dn } else { *d })
-                    //         .or_insert(dn);
-
-                    //     continue;
-                    // } else {
-                    q.push_front(n);
-                    // }
-                }
-            }
-        }
-    }
-
-    fn count_tiles_on_shortest_path(&mut self) -> usize {
-        let mut tiles_on_shortest_path: HashSet<(usize, usize)> = HashSet::new();
-
-        let dirs = vec![Dir::North, Dir::South, Dir::East, Dir::West];
-
-        for i in 0..self.tiles.len() {
-            for j in 0..self.tiles[0].len() {
-                for dir1 in dirs.iter() {
-                    self.populate_dist_map(
-                        Reindeer { p: (i, j), dir: dir1.clone() },
-                    )
-                }
-            }
-        }
-
-        let lowest_score = self.lowest_score().unwrap();
-
-        for i in 0..self.tiles.len() {
-            for j in 0..self.tiles[0].len() {
-                if self.tiles[i][j] == Tile::Wall {
-                    continue;
-                }
-
-                let mut is_on_shortest_path = false;
-
-                // println!("is {:?} on the shortest path?", (i, j));
-
-                'outer: for dir1 in dirs.iter() {
-                    for dir2 in dirs.iter() {
-                        let r = Reindeer { p: (i, j), dir: dir1.clone() };
-
-                        // println!("  r={:?}", r);
-
-                        if let Some(d1) = self.dist_map.get(&(
-                            self.reindeer,
-                            r
-                        )) {
-                            if let Some(d2) = self.dist_map.get(&(
-                                r,
-                                Reindeer { p: self.exit, dir: dir2.clone() }
-                            )) {
-                                // println!("    @ d1=dist_map({:?}, {:?})={}", self.reindeer, r, d1);
-                                // println!("    @ d2=dist_map({:?}, {:?})={}", r, Reindeer { p: self.exit, dir: dir2.clone() }, d2);
-                                // println!("    @ d1 + d2 = {}", d1 + d2);
-
-                                if d1 + d2 == lowest_score {
-                                    // println!("    >>>>>> {:?} is on the shortest path!", (i, j));
-                                    is_on_shortest_path = true;
-                                    break 'outer;
-                                }
-                            }
-                        }
+                    if *res == alt {
+                        pq.push(Edge { dst: v, cost: alt });
+                        prev.entry(v)
+                            .and_modify(|p: &mut HashSet<Node>| { p.insert(u); })
+                            .or_insert({ 
+                                let mut s = HashSet::new();
+                                s.insert(u);
+                                s
+                            });
                     }
                 }
-
-                if is_on_shortest_path {
-                    tiles_on_shortest_path.insert((i, j));
-                }
             }
         }
 
-        tiles_on_shortest_path.len()
+        (dist, prev)
     }
 }
 
@@ -250,56 +128,202 @@ impl TryFrom<&str> for Maze {
     type Error = &'static str;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
-        let mut reindeer = Reindeer {
-            p: (0usize, 0usize),
-            dir: Dir::East,
-        };
+        let mut adj_list: HashMap<Node, Vec<Edge>> = HashMap::new();
 
+        let mut src = (0usize, 0usize);
         let mut exit = (0usize, 0usize);
 
-        let tiles = input.lines().enumerate()
-            .map(|(y, row)| {
-                row.chars().enumerate().map(|(x, c)| 
-                    match c {
-                        '#' => Tile::Wall,
-                        '.' => Tile::Empty, 
-                        'S' => {
-                            reindeer.p = (y, x);
-                            Tile::Empty
-                        }
-                        'E' => {
-                            exit = (y, x);
-                            Tile::End
-                        },
-                        _ => panic!("ding"),
-                    }
-                ).collect::<Vec<_>>()
-            })
+        let tiles = input.lines()
+            .map(|row| row.chars().collect::<Vec<_>>())
             .collect::<Vec<_>>();
 
+        for y in 0..tiles.len() {
+            'next_tile: for x in 0..tiles[0].len() {
+                if tiles[y][x] == '#' {
+                    continue 'next_tile;
+                }
+
+                if tiles[y][x] == 'E' {
+                    exit = (y, x);
+                }
+
+                if tiles[y][x] == 'S' {
+                    src = (y, x);
+                }
+
+                for dir in Dir::dirs().into_iter() {
+                    let node = Node { p: (y, x), dir };
+                    let mut successors = vec![
+                        Edge { dst: node.rotate_right(), cost: 1000 },
+                        Edge { dst: node.rotate_left(), cost: 1000 },
+                    ];
+
+                    let (dy, dx) = dir.delta();
+                    let (y1, x1) = (
+                        (y as i32 + dy) as usize,
+                        (x as i32 + dx) as usize,
+                    );
+
+                    if tiles[y1][x1] != '#' {
+                        successors.push(Edge {
+                            dst: Node { p: (y1, x1), dir },
+                            cost: 1,
+                        });
+                    }
+                    
+                    adj_list.insert(node, successors);
+                }
+            }
+        }
+
         Ok(Maze {
-            reindeer,
+            src: Node { p: src, dir: Dir::East },
             exit,
-            tiles,
-            dist_map: HashMap::new(),
-        })
+            adj_list,
+       })
     }
 }
 
+fn find_pos_on_shortest_path(
+    maze: &Maze,
+    len_shortest_path: usize,
+    dist: &HashMap<Node, usize>,
+    prev: &HashMap<Node, HashSet<Node>>,
+) -> HashSet<(usize, usize)> {
+    let mut nodes_on_shortest_path: HashSet<Node> = HashSet::new();
+
+    for dir in Dir::dirs() {
+        let maybe_exit_node = Node { p: maze.exit, dir };
+
+        if *dist.get(&maybe_exit_node).unwrap() == len_shortest_path {
+            println!("{:?} can be an exit node", maybe_exit_node);
+
+            nodes_on_shortest_path.insert(maybe_exit_node);
+
+            let mut q = VecDeque::new();
+            q.push_front(maybe_exit_node);
+
+            while !q.is_empty() {
+                if let Some(n) = q.pop_back() {
+                    for &p in prev.get(&n).unwrap() {
+                        if !nodes_on_shortest_path.contains(&p) {
+                            nodes_on_shortest_path.insert(p);
+                            q.push_front(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!("{:?}", nodes_on_shortest_path.len());
+
+    nodes_on_shortest_path.into_iter()
+        .map(|n| n.p)
+        .collect::<HashSet<_>>()
+}
+
+fn highlight_shortest_path_on_maze(
+    original: &str,
+    pos_on_the_shortest_path: &HashSet<(usize, usize)>,
+) -> String {
+    original.lines().enumerate()
+        .map(|(y, row)| {
+            row.chars().enumerate()
+                .map(|(x, c)| {
+                    if pos_on_the_shortest_path.contains(&(y, x)) {
+                        'O'
+                    } else {
+                        c
+                    }
+                })
+                .collect::<String>()
+        })
+        .join("\n")
+}
+
 fn main() {
-    let mut maze: Maze = INPUT.try_into().unwrap();
+    let maze: Maze = INPUT.try_into().unwrap();
 
-    let res = maze.lowest_score();
+    let (dist, prev) = maze.dijkstra();
 
-    println!("{}", res.unwrap());
+    let len_shortest_path = dist.iter()
+        .filter_map(|(&n, &d)| {
+            if n.p == maze.exit {
+                Some(d)
+            } else {
+                None
+            }
+        })
+        .min()
+        .unwrap();
 
-    // maze.populate_dist_map(maze.reindeer);
+    println!("{}", len_shortest_path);
 
-    let res = maze.count_tiles_on_shortest_path();
+    let pos_on_shortest_path = find_pos_on_shortest_path(
+        &maze, len_shortest_path, &dist, &prev
+    );
 
-    // for ((from, to), d) in maze.dist_map {
-    //     println!("dist({:?}, {:?}) = {}", from, to, d);
-    // }
+    println!("{}", pos_on_shortest_path.len());
 
-    println!("{}", res);
+    println!("{}", highlight_shortest_path_on_maze(INPUT, &pos_on_shortest_path));
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::BinaryHeap;
+
+    use super::*;
+
+    #[test]
+    fn test_parse() {
+        let maze: Maze = "\
+#####
+#..E#
+#...#
+#S..#
+#####".try_into().unwrap();
+
+        for (k, v) in maze.adj_list {
+            println!("{:?} -> {:?}", k, v);
+        }
+    }
+
+    #[test]
+    fn test_edge_min_heap() {
+        let mut pq: BinaryHeap<Edge> = BinaryHeap::new();
+
+        pq.push(Edge { dst: Node { p: (0, 0), dir: Dir::East }, cost: 3 });
+        pq.push(Edge { dst: Node { p: (0, 0), dir: Dir::East }, cost: 5 });
+        pq.push(Edge { dst: Node { p: (0, 0), dir: Dir::East }, cost: 1 });
+        pq.push(Edge { dst: Node { p: (0, 0), dir: Dir::East }, cost: 2 });
+        pq.push(Edge { dst: Node { p: (0, 0), dir: Dir::East }, cost: 4 });
+        pq.push(Edge { dst: Node { p: (0, 0), dir: Dir::East }, cost: 7 });
+        pq.push(Edge { dst: Node { p: (0, 0), dir: Dir::East }, cost: 6 });
+
+        while !pq.is_empty() {
+            let x = pq.pop().unwrap();
+            println!("{:?}", x);
+        }
+    }
+
+    #[test]
+    fn test_shortest_path() {
+        let maze: Maze = "\
+#####
+#..E#
+#...#
+#S..#
+#####".try_into().unwrap();
+
+        let (dist, prev) = maze.dijkstra();
+
+        for (n, cost) in dist {
+            println!("{:?} -> {}", n, cost);
+        }
+
+        for (n, predecessors) in prev {
+            println!("{:?} -> {:?}", n, predecessors);
+        }
+    }
 }
