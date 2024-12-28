@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-const INPUT: &str = include_str!("./day24.txt");
+const INPUT: &str = include_str!("./day24-corrected.txt");
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 enum Wire<'a> {
@@ -93,10 +93,6 @@ impl<'a> std::fmt::Display for Gate<'a> {
     }
 }
 
-// us[i] = x[i + 1] ^ y[i + 1]
-// vs[i] = x[i + 1] & y[i + 1]
-// ws[i] = us[i] & cs[i]
-// cs[i] = vs[i] | ws[i]
 struct FruitMonitor<'a, const I: usize, const O: usize> {
     wires: HashSet<Wire<'a>>,
     gates: HashSet<Gate<'a>>,
@@ -124,6 +120,120 @@ impl<'a, const I: usize, const O: usize> TryFrom<&'a str> for FruitMonitor<'a, I
             wires,
             gates,
         })
+    }
+}
+
+impl <'a, const I: usize, const O: usize> FruitMonitor<'a, I, O> {
+    fn find_consumers(&self, wire: &Wire<'a>) -> Vec<&Gate<'a>> {
+        let mut consumers = Vec::<&Gate>::new();
+
+        for gate in self.gates.iter() {
+            if wire == &gate.a || wire == &gate.b {
+                consumers.push(gate);
+            }
+        }
+
+        consumers
+    }
+
+    // By looking at the number of gates and intermediate wires, we could
+    // conclude that the circuit is the textbook 45-bit ripple-carry
+    // full adder using only AND, OR and XOR gates.
+    //
+    // This function collects suspicious gates that does not satisfy some
+    // properties that a gate within a well-formed ripple-carry full-adder
+    // should.
+    fn find_sus(&self) -> HashSet<&Gate<'a>> {
+        let mut sus = HashSet::<&Gate<'a>>::new();
+
+        for gate in self.gates.iter() {
+            match gate.kind {
+                GateKind::And => {
+                    match (gate.a, gate.b) {
+                        (Wire::X(0), Wire::Y(0)) |
+                        (Wire::Y(0), Wire::X(0)) => {},
+
+                        (Wire::X(i), Wire::Y(j)) |
+                        (Wire::Y(j), Wire::X(i)) if i == j => {
+                            let gs = self.find_consumers(&gate.o);
+                            if gs.len() != 1 ||
+                                (gs.len() > 0 && gs[0].kind != GateKind::Or) {
+                                sus.insert(gate);
+                            }
+                        },
+                        (Wire::Other(_), Wire::Other(_)) => {
+                            let gs = self.find_consumers(&gate.o);
+                            if gs.len() != 1 ||
+                                (gs.len() > 0 && gs[0].kind != GateKind::Or) {
+                                sus.insert(gate);
+                            }
+                        },
+                        _ => {},
+                    }
+                },
+                GateKind::Or => {
+                    match (gate.a, gate.b) {
+                        (Wire::Other(_), Wire::Other(_)) => {
+                            if &gate.o == &Wire::Z(O - 1) {
+                                continue;
+                            }
+
+                            let gs = self.find_consumers(&gate.o);
+
+                            if gs.len() != 2 {
+                                sus.insert(gate);
+                            }
+
+                            let has_xor_consumer = gs.iter().any(|g| {
+                                g.kind == GateKind::Xor &&
+                                matches!(g.o, Wire::Z(_))
+                            });
+
+                            let has_and_consumer = gs.iter().any(|g| {
+                                g.kind == GateKind::And
+                            });
+
+                            if !(has_xor_consumer && has_and_consumer) {
+                                sus.insert(gate);
+                            }
+                        },
+                        _ => {
+                            sus.insert(gate);
+                        }
+                    }
+                },
+                GateKind::Xor => {
+                    match (gate.a, gate.b) {
+                        (Wire::X(0), Wire::Y(0)) |
+                        (Wire::Y(0), Wire::X(0)) => {},
+
+                        (Wire::X(i), Wire::Y(j)) |
+                        (Wire::Y(j), Wire::X(i)) if i == j => {
+                            let gs = self.find_consumers(&gate.o);
+                            if gs.len() != 2 {
+                                sus.insert(gate);
+                            }
+
+                            let has_xor_consumer = gs.iter().any(|g| {
+                                g.kind == GateKind::Xor &&
+                                matches!(g.o, Wire::Z(_))
+                            });
+
+                            let has_and_consumer = gs.iter().any(|g| {
+                                g.kind == GateKind::And
+                            });
+
+                            if !(has_xor_consumer && has_and_consumer) {
+                                sus.insert(gate);
+                            }
+                        },
+                        _ => {},
+                    }
+                },
+            }
+        }
+
+        sus
     }
 }
 
@@ -162,22 +272,15 @@ fn main() {
     let fruit_monitor: FruitMonitor<45, 46> = FruitMonitor::try_from(INPUT)
         .unwrap();
 
-    println!("{}", fruit_monitor);
-}
+    // XXX: This would print the verilog module for the fruit monitor...
+    // println!("{}", fruit_monitor);
 
-#[cfg(test)]
-mod test {
-    use crate::{Gate, GateKind, Wire};
+    let sus = fruit_monitor.find_sus();
 
-    #[test]
-    fn test_codegen() {
-        let gate = Gate {
-            kind: GateKind::Xor,
-            a: Wire::Other("meh"),
-            b: Wire::Y(3),
-            o: Wire::Z(7),
-        };
-
-        println!("{}", gate);
+    for gate in sus.iter() {
+        println!("{:?}", gate);
     }
+
+    // XXX: Wire pairs to swap are manually found based on the output :)
+    // The corrected circuit can be found in day24-corrected.txt.
 }
