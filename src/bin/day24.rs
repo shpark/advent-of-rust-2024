@@ -93,6 +93,10 @@ impl<'a> std::fmt::Display for Gate<'a> {
     }
 }
 
+// us[i] = x[i + 1] ^ y[i + 1]
+// vs[i] = x[i + 1] & y[i + 1]
+// ws[i] = us[i] & cs[i]
+// cs[i] = vs[i] | ws[i]
 struct FruitMonitor<'a, const I: usize, const O: usize> {
     wires: HashSet<Wire<'a>>,
     gates: HashSet<Gate<'a>>,
@@ -116,10 +120,10 @@ impl<'a, const I: usize, const O: usize> TryFrom<&'a str> for FruitMonitor<'a, I
                 gates.insert(gate);
             });
 
-        println!("# wires: {}", wires.len());
-        println!("# gates: {}", gates.len());
-
-        Ok(Self { wires, gates })
+        Ok(Self {
+            wires,
+            gates,
+        })
     }
 }
 
@@ -155,7 +159,8 @@ module FruitMonitor (
 }
 
 fn main() {
-    let fruit_monitor: FruitMonitor<45, 46> = FruitMonitor::try_from(INPUT).unwrap();
+    let fruit_monitor: FruitMonitor<45, 46> = FruitMonitor::try_from(INPUT)
+        .unwrap();
 
     println!("{}", fruit_monitor);
 }
