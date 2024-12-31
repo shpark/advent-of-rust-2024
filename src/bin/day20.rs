@@ -14,63 +14,137 @@ struct RaceTrack {
     start: (usize, usize),
     end: (usize, usize),
     tiles: Vec<Vec<Tile>>,
-    cheats: Vec<(usize, usize)>,
+    elapsed_ps_no_cheat: usize,
+    dist_map: HashMap<(usize, usize), usize>,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+struct Cheat {
+    cheat_start: (usize, usize),
+    cheat_end: (usize, usize),
 }
 
 impl RaceTrack {
-    fn bfs(&self) -> (
-        HashMap<(usize, usize), usize>,
-        HashMap<(usize, usize), (usize, usize)>
-    ) {
-        let mut dist: HashMap<(usize, usize), usize> = HashMap::new();
-        let mut prev: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
-        let mut q: VecDeque<(usize, usize)> = VecDeque::new();
+    fn bfs(&self, src: (usize, usize)) -> HashMap<(usize, usize), usize> {
+        let mut dist = HashMap::<(usize, usize), usize>::new();
+        dist.insert(src.clone(), 0);
 
-        dist.insert(self.start, 0);
-        q.push_front(self.start);
+        let mut q = VecDeque::<(usize, usize)>::new();
+        q.push_front(src.clone());
 
         while !q.is_empty() {
             let (y, x) = q.pop_back().unwrap();
 
-            'next_dir: for (dy, dx) in DIRS.iter() {
+            let d = *dist.get(&(y, x)).unwrap();
+
+            for &(dy, dx) in DIRS {
                 let (y1, x1) = (
                     (y as i32 + dy) as usize,
-                    (x as i32 + dx) as usize
+                    (x as i32 + dx) as usize,
                 );
 
-                if self.tiles[y1][x1] == Tile::Wall {
-                    continue 'next_dir;
-                }
-
-                if dist.get(&(y1, x1)).is_none() {
-                    prev.insert((y1, x1), (y, x));
-                    dist.insert((y1, x1), dist.get(&(y, x)).unwrap() + 1);
-                    q.push_front((y1, x1));
+                match self.tiles[y1][x1] {
+                    Tile::Track => {
+                        if !dist.contains_key(&(y1, x1)) {
+                            dist.insert((y1, x1), d + 1);
+                            q.push_front((y1, x1));
+                        }
+                    },
+                    Tile::Wall => {},
                 }
             }
         }
 
-        (dist, prev)
+        dist
     }
 
-    fn check_cheat(
-        &mut self,
-        cheat: (usize, usize),
-        orig_record: usize,
-    ) -> Option<usize> {
-        self.tiles[cheat.0][cheat.1] = Tile::Track;
+    fn populate_dist_map(&mut self)  {
+        self.dist_map = self.bfs(self.end);
+        self.elapsed_ps_no_cheat = *self.dist_map.get(&self.start).unwrap();
+    }
 
-        let (dist, _prev) = self.bfs();
+    fn pos_at_dist(
+        &self,
+        (y, x): (usize, usize),
+        dist: usize
+    ) -> Vec<(usize, usize)> {
+        let mut res = Vec::<(usize, usize)>::new();
 
-        self.tiles[cheat.0][cheat.1] = Tile::Wall;
+        for dy in 0..=dist as i32 {
+            let dx = dist as i32 - dy;
 
-        if let Some(&new_record) = dist.get(&self.end) {
-            if new_record < orig_record {
-                return Some(orig_record - new_record);
+            for &(sy, sx) in &[(1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                let (y1, x1) = (y as i32 + dy * sy, x as i32 + dx * sx);
+
+                if y1 < 0 || y1 >= self.tiles.len() as i32 ||
+                    x1 < 0 || x1 >= self.tiles[0].len() as i32 {
+                    continue;
+                }
+
+                let (y1, x1) = (y1 as usize, x1 as usize);
+
+                if self.tiles[y1][x1] == Tile::Track {
+                    res.push((y1, x1));
+                }
             }
         }
 
-        None
+        res
+    }
+
+    fn cheats_to_saved_ps(&self, budget: usize) -> HashMap<Cheat, usize> {
+        let mut cheats_to_dist = HashMap::<Cheat, usize>::new();
+
+        let mut dist = HashMap::<(usize, usize), usize>::new();
+        dist.insert(self.start, 0);
+
+        let mut q = VecDeque::<(usize, usize)>::new();
+        q.push_front(self.start);
+
+        while !q.is_empty() {
+            let cheat_start = q.pop_back().unwrap();
+
+            let before_cheat = *dist.get(&cheat_start).unwrap();
+
+            for len_cheat in 0..=budget {
+                for cheat_end in self.pos_at_dist(cheat_start, len_cheat) {
+                    let after_cheat = self.dist_map.get(&cheat_end).unwrap();
+
+                    let elapsed_ps_with_cheat = before_cheat +
+                        len_cheat +
+                        after_cheat;
+
+                    let saved_ps = self.elapsed_ps_no_cheat as i32 -
+                        elapsed_ps_with_cheat as i32;
+
+                    if saved_ps > 0 {
+                        cheats_to_dist.insert(
+                            Cheat { cheat_start, cheat_end },
+                            saved_ps as usize,
+                        );
+                    }
+                }
+            }
+
+            for &(dy, dx) in DIRS {
+                let (y1, x1) = (
+                    (cheat_start.0 as i32 + dy) as usize,
+                    (cheat_start.1 as i32 + dx) as usize,
+                );
+
+                match self.tiles[y1][x1] {
+                    Tile::Track => {
+                        if !dist.contains_key(&(y1, x1)) {
+                            dist.insert((y1, x1), before_cheat + 1);
+                            q.push_front((y1, x1));
+                        }
+                    },
+                    Tile::Wall => {},
+                }
+            }
+        }
+
+        cheats_to_dist
     }
 }
 
@@ -126,30 +200,34 @@ impl TryFrom<&str> for RaceTrack {
             });
         });
 
-        Ok(RaceTrack { start, end, tiles, cheats })
+        Ok(RaceTrack {
+            start,
+            end,
+            tiles,
+            elapsed_ps_no_cheat: 0,
+            dist_map: HashMap::new()
+        })
     }
 }
 
 fn main() {
-    let mut race_track: RaceTrack = INPUT.try_into().unwrap();
+    let mut race_track = RaceTrack::try_from(INPUT).unwrap();
 
-    let orig_record = *race_track.bfs().0.get(&race_track.end).unwrap();
+    race_track.populate_dist_map();
 
-    let mut num_cheats_by_saved_ps: HashMap<usize, usize> = HashMap::new();
+    let cheat_to_saved_ps = race_track.cheats_to_saved_ps(2);
 
-    for &cheat in race_track.cheats.clone().iter() {
-        if let Some(saved) = race_track.check_cheat(cheat, orig_record) {
-            num_cheats_by_saved_ps.entry(saved)
-                .and_modify(|s| { *s += 1; })
-                .or_insert(1);
-        }
-    }
+    let res = cheat_to_saved_ps.into_iter()
+        .filter(|&(_cheat, saved_ps)| saved_ps >= 100)
+        .count();
 
-    let res = num_cheats_by_saved_ps.iter()
-        .filter_map(|(&k, v)| {
-            if k >= 100 { Some(v) } else { None }
-        })
-        .sum::<usize>();
+    println!("{}", res);
+
+    let cheat_to_saved_ps = race_track.cheats_to_saved_ps(20);
+
+    let res = cheat_to_saved_ps.into_iter()
+        .filter(|&(_cheat, saved_ps)| saved_ps >= 100)
+        .count();
 
     println!("{}", res);
 }
